@@ -43,34 +43,20 @@ import matplotlib.pyplot as plt_sne
 import os
 from sklearn.metrics import confusion_matrix
 from sklearn.preprocessing import normalize
-import plotly.express as px
 
+
+# datas = np.load('ProcessData_all.npz')
+# dataset = datas['Inputx']
+# labelset = datas['Labelx']
+# LabelxWithSeverity = datas['LabelxWithSeverity']
 seednum = 8
 
 torch.manual_seed(seednum)
 UnlabeledData_batchsize = 128
 
 # *********************** Step 1: the dataset *********************************
-# filepath = "C:/Users\HNU\Desktop\对比\KNN_Iris-Machine_Learning-master\KNN_Iris-Machine_Learning-master\ProcessData40.mat"
-#
-# labeled_data = loadmat(filepath)['LabeledSetNor']
-# labels = loadmat(filepath)['SupLabel'].flatten()
-# # x_led = labeled_data
-# # y_led = labels
-# x_led = []
-# y_led = []
-# for i in range(8):
-#     x_l = labeled_data[labels == i, :][:13, :]
-#     y_l = labels[labels == i][:13]
-#     x_led.append(x_l)
-#     y_led.append(y_l)
-# x_led = torch.tensor(x_led)
-# labeled_data = x_led.reshape(-1,61).float()
-# labels = torch.Tensor(y_led).flatten()
-# labels = torch.tensor(labels,dtype=torch.int64)
 transform = transforms.Compose([transforms.ToTensor()])
-filepath = "D:\semi_gan\ScienceDirect_files_29Nov2023_02-01-20.166/1-s2.0-S030626192100026X-mmc4\ProcessData120.mat"
-# Load the dataset
+filepath = "C:/Users\HNU\Desktop/upload\ProcessData_v100.mat"
 labeled_data = loadmat(filepath)['LabeledSetNor']
 labels = loadmat(filepath)['SupLabel']
 labeled_data = torch.from_numpy(labeled_data).float()
@@ -162,12 +148,7 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
     # Get random interpolation between real and fake samples
     interpolates = torch.tensor((alpha * real_samples + ((1 - alpha) * fake_samples)),dtype=torch.float32).requires_grad_(True)
     _,d_interpolates = D(interpolates)
-    # interpolates = torch.tensor(interpolates.view(interpolates.shape[0], -1),dtype= torch.float32).requires_grad_(True)
-    # d_interpolates = F.softplus(log_sum_exp(D(interpolates)))
-    # fake = log_sum_exp(D(interpolates))
     fake = torch.ones_like(d_interpolates).requires_grad_(False)
-    # fake = Variable((real_samples.shape[0], 1).fill_(1.0), requires_grad=False)
-    # Get gradient w.r.t. interpolates
     gradients = autograd.grad(
         outputs=d_interpolates,
         inputs=interpolates,
@@ -192,6 +173,7 @@ l_his = []
 best_model_wts = copy.deepcopy(netD.state_dict())
 best_acc = 0.0
 lambda_gp = 10
+un = []
 
 for epoch in range(EPOCH):
     print('Epoch: ', epoch)
@@ -225,7 +207,6 @@ for epoch in range(EPOCH):
         logsumexp_output = log_sum_exp(output)
         predicted_label = torch.gather(output, 1, labels.unsqueeze(1))
         labeled_loss = torch.mean(logsumexp_output) - torch.mean(predicted_label)
-        # label_loss2 = 0.5*(torch.mean(F.softplus(logsumexp_output)) - torch.mean(logsumexp_output))
         
         
         loss =   labeled_loss + unlabeled_loss + fake_loss + lambda_gp*gradient_penalty
@@ -249,6 +230,11 @@ for epoch in range(EPOCH):
         ps = torch.exp(ps)
     
     ps = ps.numpy()
+
+    if epoch == 499:
+        uncertain = np.max(ps, axis=1)
+        un.append(uncertain)
+
     pred_label = np.argmax(ps, axis=1)
     true_label = testlabel.numpy()
 
@@ -261,127 +247,12 @@ for epoch in range(EPOCH):
         best_model_wts = copy.deepcopy(netD.state_dict())
         best_epoch_index = epoch
     
-    print("Epoch {} - Testing loss: {}".format(epoch, accuracy_test))
-    
+    print("Epoch {} - Testing loss: {}:".format(epoch, accuracy_test))
 plt.plot(l_his)
 plt.xlabel('Epochs')
 plt.ylabel('Accuracy')
+
 print('Best test accuracy: ', best_acc*100, '% after ', best_epoch_index, ' training epochs')
-plt.show()
 f_p = pred_label
 f_t = true_label
 print("F1-Score:{:.4f}".format(f1_score(f_t,f_p,average='micro')))
-tm = np.array(l_his)
-tm = tm[480:]
-a = np.std(tm)
-print("标准差：{:.4f}", a)
-print("混淆矩阵:{:.4f}",confusion_matrix(f_p, f_t)/len(f_p), '%')
-def confusion_matrix(preds,labels,conf_matrix):
-    for p,t in zip(preds,labels):
-        conf_matrix[p,t] +=1
-    return conf_matrix
-conf_matrix = torch.zeros(8,8)
-conf_matrix = confusion_matrix(f_p, f_t,conf_matrix)
-conf_matrix.cpu()
-conf_matrix = np.array(conf_matrix)
-corrects = conf_matrix.diagonal(offset=0)
-pre_kinds = conf_matrix.sum(axis=1)
-print("混淆矩阵总元素个数：{0}，测试集总个数{1}".format(int(np.sum(conf_matrix)),len(f_p)))
-print(conf_matrix)
-print("每种故障总个数：", pre_kinds)
-print("每种故障的识别准确率为：{0}".format([rate*100] for rate in corrects/pre_kinds))
-
-fault_type = 8
-# labels = ['cf','eo','fwc','fwe','nc','rl','ro','normal' ]
-labels = ['F1','F2','F3','F4','F5','F6','F7','F0' ]
-# plt.imshow(conf_matrix,cmap=plt.cm.Blues)
-# thresh = conf_matrix.max()/2
-# for x in range(fault_type):
-#     for y in range(fault_type):
-#         info = round(conf_matrix[y,x]/len(f_p)*100,2)
-#         plt.text(x,y,info,
-#                  verticalalignment='center',
-#                  horizontalalignment='center',color="white" if info>thresh else "black")
-normalized_conf_matrix = normalize(conf_matrix,axis=1,norm='l1')*100
-sns.heatmap(normalized_conf_matrix, annot=True,fmt='.2f', cmap='Blues', cbar=True, square=True,annot_kws={'size':12})
-plt.tight_layout()
-plt.yticks(range(fault_type),labels,fontsize=12)
-# plt.xticks(range(fault_type),labels,rotation=45,fontsize=12)
-plt.xticks(range(fault_type),labels,fontsize=12)
-plt.show()
-
-# showdata = testdata[:2000,:]
-# # showlabel = testlabel[:2000]
-# # showdata,_ = netD(showdata)
-# #
-# # tsne = TSNE(n_components=3, init='pca',perplexity=30,early_exaggeration=4,learning_rate=1000,n_iter=3000, verbose=1, random_state=33)
-# # result = tsne.fit_transform(showdata.detach())
-# # scaler = preprocessing.MinMaxScaler(feature_range=(-1,1))
-# # result = scaler.fit_transform(result)
-# #
-# # fig = plt.figure(figsize=(20, 20))
-# # ax = fig.add_subplot(projection='3d')
-# # # ax = fig.add_subplot()
-# # ax.set_title('t-SNE process')
-# # ax.scatter(result[:,0], result[:,1],result[:,2], c=showlabel, s=10)
-# # # ax.scatter(result[:,0], result[:,1], c=showlabel, s=10)
-# # plt.show()
-# showdata = labeled_data
-# showlabel = labels
-# showdata,_ = netD(showdata)
-# tsne = TSNE(n_components=2)
-# result = tsne.fit_transform(showdata.detach())
-# scaler = preprocessing.MinMaxScaler(feature_range=(-1,1))
-# # result = scaler.fit_transform(result)
-# result = scaler.fit_transform(result)
-# class_num = len(np.unique(labels))
-# df = pd.DataFrame()
-# df["y"] = showlabel
-# df["comp1"] = result[:, 0]
-# df["comp2"] = result[:, 1]
-# # df["comp3"] = result[:, 2]
-# hex = ['black', 'red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink']
-
-# data_label = []
-# for v in df.y.tolist():
-#     if v == 0:
-#         data_label.append("c0")
-#     elif v == 1:
-#         data_label.append("c1")
-#     elif v == 2:
-#         data_label.append("c2")
-#     elif v == 3:
-#         data_label.append("c3")
-#     elif v == 4:
-#         data_label.append("c4")
-#     elif v == 5:
-#         data_label.append("c5")
-#     elif v == 6:
-#         data_label.append("c6")
-#     elif v == 7:
-#         data_label.append("c7")
-# df["value"] = data_label
-# # sns.scatterplot(x=df.comp1.tolist(), y=df.comp2.tolist(), z=df.comp3.tolist(), hue=df.value.tolist(), style=df.value.tolist(),
-# #                 palette=sns.color_palette(hex, class_num),
-# #                 markers={"c0": ".", "c1": ".", "c2": ".", "c3": ".", "c4": ".", "c5": ".", "c6": ".", "c7": "."},
-# #                 # s = 10,
-# #                 data=df).set(title="")  # T-SNE projection
-# sns.scatterplot(x=df.comp1.tolist(), y=df.comp2.tolist(), z=df.comp2.tolist(),  hue=df.value.tolist(), style=df.value.tolist(),
-#                 palette=sns.color_palette(hex, class_num),
-#                 markers={"c0": ".", "c1": ".", "c2": ".", "c3": ".", "c4": ".", "c5": ".", "c6": ".", "c7": "."},
-#                 # s = 10,
-#                 data=df).set(title="")  # T-SNE projection
-#
-# # 指定图注的位置 "lower right"
-# plt_sne.legend(loc = "lower right")
-# plt_sne.axis("off")
-# plt_sne.savefig(os.path.join("C:/Users\HNU\Desktop\对比\T-SNE\pic"",%s.jpg") % str(3),format = 'jpg', dpi = 300)
-# fig = plt.figure(figsize=(20, 20))
-# ax = fig.add_subplot(projection='3d')
-# # ax = fig.add_subplot()
-# ax.set_title('t-SNE process')
-# # ax.scatter(result[:,0], result[:,1],result[:,2], c=showlabel, s=10)
-# ax.scatter(result[:,0], result[:,1], c=showlabel, s=10)
-# plt.show()
-
-
